@@ -12,10 +12,10 @@ import (
 )
 
 type Config struct {
-	SlowThreshold             time.Duration
-	IgnoreRecordNotFoundError bool
-	ParameterizedQueries      bool
-	LogLevel                  gormlogger.LogLevel
+	SlowThreshold             time.Duration       `json:"slow_threshold"`
+	IgnoreRecordNotFoundError bool                `json:"ignore_record_not_found_error"`
+	ParameterizedQueries      bool                `json:"parameterized_queries"`
+	LogLevel                  gormlogger.LogLevel `json:"log_level"`
 }
 
 func NewConfig() *Config {
