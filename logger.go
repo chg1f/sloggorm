@@ -17,34 +17,35 @@ type Config struct {
 	ParameterizedQueries      bool                `json:"parameterized_queries"`
 	LogLevel                  gormlogger.LogLevel `json:"log_level"`
 }
-
-func NewConfig() *Config {
-	return &Config{
-		SlowThreshold:             time.Second,
-		IgnoreRecordNotFoundError: true,
-		ParameterizedQueries:      false,
-		LogLevel:                  gormlogger.Warn,
-	}
-}
-
 type Logger struct {
 	Config
-	*slog.Logger
+	Logger *slog.Logger
 }
 
-func NewLogger(logger *slog.Logger, conf *Config) *Logger {
-	l := new(Logger)
-	l.Config = *conf
-	l.Logger = logger
-	return l
+func New(conf *Config) *Logger {
+	return &Logger{Config: *conf}
+}
+
+func (l *Logger) getLogger() *slog.Logger {
+	if l.Logger == nil {
+		return slog.Default()
+	}
+	return l.Logger
+}
+
+func (l *Logger) With(log *slog.Logger) *Logger {
+	c := new(Logger)
+	c.Config = l.Config
+	c.Logger = log
+	return c
 }
 
 func (l *Logger) LogMode(level gormlogger.LogLevel) gormlogger.Interface {
-	clone := new(Logger)
-	clone.Logger = l.Logger
-	clone.Config = l.Config
-	clone.LogLevel = level
-	return clone
+	c := new(Logger)
+	c.Config = l.Config
+	c.Logger = l.Logger
+	c.LogLevel = level
+	return c
 }
 
 func (l *Logger) Trace(ctx context.Context, begin time.Time, fc func() (sql string, rowsAffected int64), err error) {
@@ -53,7 +54,7 @@ func (l *Logger) Trace(ctx context.Context, begin time.Time, fc func() (sql stri
 
 	if err != nil && (!l.IgnoreRecordNotFoundError || !errors.Is(err, gorm.ErrRecordNotFound)) {
 		if l.LogLevel >= gormlogger.Error {
-			l.WarnContext(ctx, "Traced",
+			l.getLogger().WarnContext(ctx, "Traced",
 				slog.String("error", err.Error()),
 				slog.Duration("latency", latency),
 				slog.Int64("rows", rows),
@@ -62,7 +63,7 @@ func (l *Logger) Trace(ctx context.Context, begin time.Time, fc func() (sql stri
 		}
 	} else if l.SlowThreshold != 0 && latency > l.SlowThreshold {
 		if l.LogLevel >= gormlogger.Warn {
-			l.InfoContext(ctx, "Traced",
+			l.getLogger().InfoContext(ctx, "Traced",
 				slog.Duration("latency", latency),
 				slog.Int64("rows", rows),
 				slog.String("sql", sql),
@@ -70,7 +71,7 @@ func (l *Logger) Trace(ctx context.Context, begin time.Time, fc func() (sql stri
 		}
 	} else {
 		if l.LogLevel >= gormlogger.Info {
-			l.DebugContext(ctx, "Traced",
+			l.getLogger().DebugContext(ctx, "Traced",
 				slog.Duration("latency", latency),
 				slog.Int64("rows", rows),
 				slog.String("sql", sql),
@@ -81,19 +82,19 @@ func (l *Logger) Trace(ctx context.Context, begin time.Time, fc func() (sql stri
 
 func (l *Logger) Error(ctx context.Context, msg string, args ...interface{}) {
 	if l.LogLevel >= gormlogger.Error {
-		l.WarnContext(ctx, fmt.Sprintf(msg, args...))
+		l.getLogger().WarnContext(ctx, fmt.Sprintf(msg, args...))
 	}
 }
 
 func (l *Logger) Warn(ctx context.Context, msg string, args ...interface{}) {
 	if l.LogLevel >= gormlogger.Warn {
-		l.InfoContext(ctx, fmt.Sprintf(msg, args...))
+		l.getLogger().InfoContext(ctx, fmt.Sprintf(msg, args...))
 	}
 }
 
 func (l *Logger) Info(ctx context.Context, msg string, args ...interface{}) {
 	if l.LogLevel >= gormlogger.Info {
-		l.DebugContext(ctx, fmt.Sprintf(msg, args...))
+		l.getLogger().DebugContext(ctx, fmt.Sprintf(msg, args...))
 	}
 }
 
