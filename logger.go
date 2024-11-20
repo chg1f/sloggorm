@@ -73,17 +73,17 @@ func (l *Logger) Trace(ctx context.Context, begin time.Time, fc func() (sql stri
 		return
 	}
 	latency := time.Since(begin)
-	if err != nil && (!l.Config.IgnoreRecordNotFoundError || !errors.Is(err, gorm.ErrRecordNotFound)) && l.Config.LogLevel >= gormlogger.Error {
+	if err != nil && (!l.Config.IgnoreRecordNotFoundError || !errors.Is(err, gorm.ErrRecordNotFound)) && l.Config.LogLevel >= gormlogger.Warn {
 		if sql, rows := fc(); rows == -1 {
-			l.logger().ErrorContext(ctx, "Traced", slog.String("error", err.Error()), slog.Duration("latency", latency), slog.String("sql", sql))
+			l.logger().WarnContext(ctx, "Failed", slog.String("error", err.Error()), slog.Duration("latency", latency), slog.String("sql", sql))
 		} else {
-			l.logger().ErrorContext(ctx, "Traced", slog.String("error", err.Error()), slog.Duration("latency", latency), slog.Int64("rows", rows), slog.String("sql", sql))
+			l.logger().WarnContext(ctx, "Failed", slog.String("error", err.Error()), slog.Duration("latency", latency), slog.Int64("rows", rows), slog.String("sql", sql))
 		}
-	} else if l.Config.SlowThreshold != 0 && latency > l.Config.SlowThreshold && l.Config.LogLevel >= gormlogger.Warn {
+	} else if l.Config.SlowThreshold != 0 && latency > l.Config.SlowThreshold && l.Config.LogLevel >= gormlogger.Info {
 		if sql, rows := fc(); rows == -1 {
-			l.logger().WarnContext(ctx, "Traced", slog.Duration("latency", latency), slog.String("sql", sql))
+			l.logger().InfoContext(ctx, "Slowed", slog.Duration("latency", latency), slog.String("sql", sql))
 		} else {
-			l.logger().WarnContext(ctx, "Traced", slog.Duration("latency", latency), slog.Int64("rows", rows), slog.String("sql", sql))
+			l.logger().InfoContext(ctx, "Slowed", slog.Duration("latency", latency), slog.Int64("rows", rows), slog.String("sql", sql))
 		}
 	} else if l.Config.LogLevel >= gormlogger.Info {
 		if sql, rows := fc(); rows == -1 {
