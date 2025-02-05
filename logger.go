@@ -4,57 +4,31 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
-	"github.com/sagikazarmark/slog-shim"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 )
 
-type (
-	Config struct {
-		LogLevel             gormlogger.LogLevel
-		ParameterizedQueries bool
+type Config struct {
+	LogLevel                  gormlogger.LogLevel
+	ParameterizedQueries      bool
+	IgnoreRecordNotFoundError bool
+	FailedLevel               slog.Level
+	SlowThreshold             time.Duration
+}
 
-		ErrorLevel                slog.Level
-		WarnLevel                 slog.Level
-		InfoLevel                 slog.Level
-		IgnoreRecordNotFoundError bool
-		FailedLevel               slog.Level
-		SlowThreshold             time.Duration
-		SlowedLevel               slog.Level
-		TracedLevel               slog.Level
+type Logger struct {
+	*slog.Logger
+	Config
+}
+
+func New(log *slog.Logger, cfg *Config) *Logger {
+	return &Logger{
+		Logger: log,
+		Config: *cfg,
 	}
-	Logger struct {
-		Config
-		*slog.Logger
-	}
-)
-
-func New(log *slog.Logger, cfg *Config) *Logger { return &Logger{Logger: log, Config: *cfg} }
-
-var (
-	Default = New(nil, &Config{
-		LogLevel:                  gormlogger.Info,
-		ParameterizedQueries:      false,
-		IgnoreRecordNotFoundError: true,
-		SlowThreshold:             time.Second,
-
-		ErrorLevel:  slog.LevelError,
-		WarnLevel:   slog.LevelWarn,
-		InfoLevel:   slog.LevelInfo,
-		FailedLevel: slog.LevelWarn,
-		SlowedLevel: slog.LevelDebug,
-		TracedLevel: slog.LevelDebug,
-	})
-	Discard = Default.LogMode(gormlogger.Silent)
-)
-
-func (l *Logger) logger() *slog.Logger {
-	if l.Logger == nil {
-		return slog.Default()
-	}
-	return l.Logger
 }
 
 func (l *Logger) LogMode(level gormlogger.LogLevel) gormlogger.Interface {
@@ -66,53 +40,48 @@ func (l *Logger) LogMode(level gormlogger.LogLevel) gormlogger.Interface {
 }
 
 func (l *Logger) Error(ctx context.Context, msg string, args ...interface{}) {
-	if l.Config.LogLevel >= gormlogger.Error {
-		l.logger().LogAttrs(ctx, l.Config.ErrorLevel, fmt.Sprintf(msg, args...))
+	if l.LogLevel >= gormlogger.Error {
+		l.ErrorContext(ctx, fmt.Sprintf(msg, args...))
 	}
 }
 
 func (l *Logger) Warn(ctx context.Context, msg string, args ...interface{}) {
-	if l.Config.LogLevel >= gormlogger.Warn {
-		l.logger().LogAttrs(ctx, l.Config.WarnLevel, fmt.Sprintf(msg, args...))
+	if l.LogLevel >= gormlogger.Warn {
+		l.WarnContext(ctx, fmt.Sprintf(msg, args...))
 	}
 }
 
 func (l *Logger) Info(ctx context.Context, msg string, args ...interface{}) {
-	if l.Config.LogLevel >= gormlogger.Info {
-		l.logger().LogAttrs(ctx, l.Config.InfoLevel, fmt.Sprintf(msg, args...))
+	if l.LogLevel >= gormlogger.Info {
+		l.InfoContext(ctx, fmt.Sprintf(msg, args...))
 	}
 }
 
 func (l *Logger) Trace(ctx context.Context, begin time.Time, fc func() (sql string, rowsAffected int64), err error) {
-	if l.Config.LogLevel <= gormlogger.Silent {
+	if l.LogLevel <= gormlogger.Silent {
 		return
 	}
+
 	latency := time.Since(begin)
-	if err != nil && (!l.Config.IgnoreRecordNotFoundError || !errors.Is(err, gorm.ErrRecordNotFound)) && l.Config.LogLevel >= gormlogger.Error {
-		if sql, rows := fc(); rows == -1 {
-			l.logger().LogAttrs(ctx, l.Config.FailedLevel, "Failed", slog.String("error", err.Error()), slog.Duration("latency", latency), slog.String("sql", sql))
-		} else {
-			l.logger().LogAttrs(ctx, l.Config.FailedLevel, "Failed", slog.String("error", err.Error()), slog.Duration("latency", latency), slog.Int64("rows", rows), slog.String("sql", sql))
-		}
-	} else if l.Config.SlowThreshold != 0 && latency > l.Config.SlowThreshold && l.Config.LogLevel >= gormlogger.Warn {
-		if sql, rows := fc(); rows == -1 {
-			l.logger().LogAttrs(ctx, l.Config.SlowedLevel, "Slowed", slog.Duration("latency", latency), slog.String("sql", sql))
-		} else {
-			l.logger().LogAttrs(ctx, l.Config.SlowedLevel, "Slowed", slog.Duration("latency", latency), slog.Int64("rows", rows), slog.String("sql", sql))
-		}
-	} else if l.Config.LogLevel >= gormlogger.Info {
-		if sql, rows := fc(); rows == -1 {
-			l.logger().LogAttrs(ctx, l.Config.TracedLevel, "Traced", slog.Duration("latency", latency), slog.String("sql", sql))
-		} else {
-			l.logger().LogAttrs(ctx, l.Config.TracedLevel, "Traced", slog.Duration("latency", latency), slog.Int64("rows", rows), slog.String("sql", sql))
-		}
+
+	log := l.With(slog.Duration("latency", latency))
+	if sql, rows := fc(); rows == -1 {
+		log.With(slog.String("sql", sql), slog.Int64("rows", rows))
+	}
+
+	if err != nil && (!l.IgnoreRecordNotFoundError || !errors.Is(err, gorm.ErrRecordNotFound)) {
+		log.WarnContext(ctx, "Failed", slog.String("error", err.Error()))
+	} else if l.SlowThreshold != 0 && latency > l.SlowThreshold {
+		log.InfoContext(ctx, "Slowed")
+	} else {
+		log.DebugContext(ctx, "Traced")
 	}
 }
 
 var _ gormlogger.Interface = &Logger{}
 
 func (l *Logger) ParamsFilter(ctx context.Context, sql string, params ...interface{}) (string, []interface{}) {
-	if l.Config.ParameterizedQueries {
+	if l.ParameterizedQueries {
 		return sql, nil
 	}
 	return sql, params
