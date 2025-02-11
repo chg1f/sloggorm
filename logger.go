@@ -65,8 +65,10 @@ func (l *Logger) Trace(ctx context.Context, begin time.Time, fc func() (sql stri
 	latency := time.Since(begin)
 
 	log := l.With(slog.Duration("latency", latency))
-	if sql, rows := fc(); rows == -1 {
-		log.With(slog.String("sql", sql), slog.Int64("rows", rows))
+	sql, rows := fc()
+	slog.With(log, slog.String("sql", sql))
+	if rows == -1 {
+		log.With(slog.Int64("rows", rows))
 	}
 
 	if err != nil && (!l.IgnoreRecordNotFoundError || !errors.Is(err, gorm.ErrRecordNotFound)) {
